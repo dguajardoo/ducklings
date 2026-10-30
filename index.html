@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Patitos">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#FFF8E1">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>Patitos al escondite</title>
+<style>
+  :root {
+    --ink: #0B5563;
+    --paper: #FFF8E1;
+    --sun: #FFE27A;
+    --water: #BFE6F2;
+    --water-deep: #8FD0E6;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Fredoka", ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", system-ui, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+
+  header { text-align: center; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  .eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0.25em; }
+  h1 { margin: 0; font-size: clamp(30px, 8vw, 50px); line-height: 1.05; font-weight: 700; }
+  .sub { font-size: 16px; font-weight: 500; }
+
+  .status { display: flex; flex-direction: column; gap: 8px; }
+  .status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .count { font-size: 22px; font-weight: 700; }
+  .count span { font-weight: 500; font-size: 16px; }
+  .bar { height: 14px; border: 2px solid var(--ink); border-radius: 999px; background: #fff; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--sun); border-right: 2px solid var(--ink); transition: width .25s ease; }
+  .bar > i[style*="width: 0%"] { border-right: 0; }
+
+  button.action {
+    font: inherit; font-weight: 600; font-size: 16px; color: var(--ink);
+    background: #fff; border: 2px solid var(--ink); border-radius: 999px;
+    padding: 10px 18px; min-height: 44px; touch-action: manipulation; cursor: pointer;
+  }
+  button.action:active { background: var(--water); }
+
+  .win {
+    display: none; text-align: center; font-weight: 700; font-size: 20px;
+    background: var(--sun); border: 2px solid var(--ink); border-radius: 18px; padding: 12px 16px;
+  }
+  .win.on { display: block; }
+
+  .board { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: clamp(3px, 0.9vw, 6px); }
+  .cell {
+    position: relative; aspect-ratio: 1 / 1; padding: 0; margin: 0;
+    border: 2px solid var(--ink); border-radius: 22%;
+    background: #fff; color: var(--ink);
+    font: inherit; font-weight: 700; font-size: clamp(12px, 3.6vw, 28px);
+    display: flex; align-items: center; justify-content: center;
+    touch-action: manipulation; cursor: pointer;
+    transition: background .15s ease;
+  }
+  .cell.y { background: var(--sun); }
+  .cell:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  .cell .n { line-height: 1; }
+  .cell svg { display: none; position: absolute; inset: 14% 8% 6% 8%; width: 84%; height: 80%; pointer-events: none; }
+  .cell[aria-pressed="true"] { background: var(--water); }
+  .cell[aria-pressed="true"] svg { display: block; animation: pop .32s ease-out; }
+  .cell[aria-pressed="true"] .n {
+    position: absolute; top: 5%; left: 11%; font-size: 0.5em; opacity: .9;
+  }
+  @keyframes pop { 0% { transform: scale(.3) rotate(-12deg); } 65% { transform: scale(1.18) rotate(4deg); } 100% { transform: scale(1) rotate(0); } }
+  @media (prefers-reduced-motion: reduce) { .cell[aria-pressed="true"] svg { animation: none; } .bar > i { transition: none; } }
+
+  .waves { margin-top: 4px; height: 56px; position: relative; }
+  .waves svg { width: 100%; height: 100%; display: block; }
+
+  /* Teléfonos en vertical: 5 columnas para que cada casilla sea fácil de tocar */
+  @media (max-width: 520px) {
+    .board { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .cell { font-size: clamp(22px, 7.5vw, 32px); }
+  }
+
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { padding: 0; }
+    .no-print { display: none !important; }
+    .board { grid-template-columns: repeat(10, minmax(0, 1fr)) !important; gap: 6px !important; }
+    .cell { font-size: 26px !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="duck" viewBox="0 0 100 100">
+    <ellipse cx="46" cy="66" rx="34" ry="24" fill="#FFD23F" stroke="#0B5563" stroke-width="4"/>
+    <path d="M62 62 Q82 50 88 38" fill="none" stroke="#0B5563" stroke-width="4" stroke-linecap="round"/>
+    <path d="M30 66 Q44 80 62 66" fill="none" stroke="#0B5563" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="64" cy="34" r="19" fill="#FFD23F" stroke="#0B5563" stroke-width="4"/>
+    <path d="M80 34 L96 38 L80 44 Z" fill="#FF9F1C" stroke="#0B5563" stroke-width="4" stroke-linejoin="round"/>
+    <circle cx="68" cy="30" r="3.8" fill="#0B5563"/>
+  </symbol>
+</svg>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">TABLERO DE LA CAZA</div>
+    <h1>Patitos al escondite</h1>
+    <div class="sub">Toca el número de cada patito que encuentres</div>
+  </header>
+
+  <section class="status" aria-live="polite">
+    <div class="status-row">
+      <div class="count"><b id="found">0</b> <span>de 100 encontrados</span></div>
+      <button class="action no-print" id="reset" type="button">Reiniciar</button>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bar"><i id="fill" style="width: 0%"></i></div>
+    <div class="win" id="win">¡Encontraste los 100 patitos!</div>
+  </section>
+
+  <main class="board" id="board" aria-label="Tablero del 1 al 100"></main>
+
+  <div class="waves" aria-hidden="true">
+    <svg viewBox="0 0 794 56" preserveAspectRatio="none">
+      <path d="M0 22 Q50 4 100 22 T200 22 T300 22 T400 22 T500 22 T600 22 T700 22 T800 22 L800 56 L0 56 Z" fill="#BFE6F2"/>
+      <path d="M0 38 Q50 22 100 38 T200 38 T300 38 T400 38 T500 38 T600 38 T700 38 T800 38 L800 56 L0 56 Z" fill="#8FD0E6"/>
+    </svg>
+  </div>
+</div>
+
+<script>
+(function () {
+  var KEY = 'patitos-escondite-v1';
+  var total = 100;
+  var marked = {};          // { numero: true }
+  var memoryOnly = false;   // si el navegador no deja guardar, funciona igual en memoria
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) {
+        JSON.parse(raw).forEach(function (n) { if (n >= 1 && n <= total) marked[n] = true; });
+      }
+    } catch (e) { memoryOnly = true; }
+  }
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(Object.keys(marked).map(Number)));
+    } catch (e) { memoryOnly = true; }
+  }
+
+  var board = document.getElementById('board');
+  var foundEl = document.getElementById('found');
+  var fillEl = document.getElementById('fill');
+  var barEl = document.getElementById('bar');
+  var winEl = document.getElementById('win');
+  var cells = [];
+
+  function build() {
+    for (var i = 1; i <= total; i++) {
+      var r = Math.floor((i - 1) / 10), c = (i - 1) % 10;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cell' + (((r + c) % 2 === 0) ? ' y' : '');
+      b.dataset.n = i;
+      b.innerHTML = '<span class="n">' + i + '</span><svg aria-hidden="true"><use href="#duck"/></svg>';
+      board.appendChild(b);
+      cells[i] = b;
+    }
+  }
+
+  function paint(n) {
+    var on = !!marked[n];
+    cells[n].setAttribute('aria-pressed', on ? 'true' : 'false');
+    cells[n].setAttribute('aria-label', 'Patito ' + n + (on ? ', encontrado' : ', sin encontrar'));
+  }
+
+  function summary() {
+    var count = Object.keys(marked).length;
+    foundEl.textContent = count;
+    fillEl.style.width = count + '%';
+    barEl.setAttribute('aria-valuenow', count);
+    winEl.classList.toggle('on', count === total);
+  }
+
+  board.addEventListener('click', function (e) {
+    var b = e.target.closest('.cell');
+    if (!b) return;
+    var n = +b.dataset.n;
+    if (marked[n]) delete marked[n]; else marked[n] = true;
+    paint(n); summary(); save();
+  });
+
+  document.getElementById('reset').addEventListener('click', function () {
+    if (!Object.keys(marked).length) return;
+    if (confirm('¿Borrar todas las marcas y empezar de nuevo?')) {
+      marked = {};
+      for (var i = 1; i <= total; i++) paint(i);
+      summary(); save();
+    }
+  });
+
+  build(); load();
+  for (var i = 1; i <= total; i++) paint(i);
+  summary();
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
+</body>
+</html>
