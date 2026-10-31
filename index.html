@@ -39,7 +39,7 @@
   .sub { font-size: 16px; font-weight: 500; }
 
   .status { display: flex; flex-direction: column; gap: 8px; }
-  .status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .count { font-size: 22px; font-weight: 700; }
   .count span { font-weight: 500; font-size: 16px; }
   .bar { height: 14px; border: 2px solid var(--ink); border-radius: 999px; background: #fff; overflow: hidden; }
@@ -58,6 +58,31 @@
     background: var(--sun); border: 2px solid var(--ink); border-radius: 18px; padding: 12px 16px;
   }
   .win.on { display: block; }
+  .win button { margin-top: 10px; }
+
+  #fx {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    display: none; opacity: 0; z-index: 50; pointer-events: none;
+    background: rgba(6, 38, 50, 0.86);
+    transition: opacity .5s ease;
+  }
+  #fx.on { opacity: 1; }
+
+  #msg {
+    position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+    z-index: 60; display: none; opacity: 0; text-align: center; padding: 0 20px;
+    pointer-events: none; color: #FFF8E1;
+    text-shadow: 0 2px 14px rgba(0, 0, 0, .65);
+    transition: opacity .5s ease;
+  }
+  #msg.on { opacity: 1; }
+  #msg svg { width: clamp(56px, 16vw, 90px); height: clamp(56px, 16vw, 90px); }
+  #msg .big { font-size: clamp(34px, 10vw, 72px); font-weight: 700; color: #FFD23F; line-height: 1.05; }
+  #msg .small { font-size: clamp(20px, 5.5vw, 34px); font-weight: 600; margin-top: 8px; }
+  #msg.on .big, #msg.on svg { animation: pop2 .8s ease-out; }
+  @keyframes pop2 { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { #msg.on .big, #msg.on svg { animation: none; } }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
   .board { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: clamp(3px, 0.9vw, 6px); }
   .cell {
@@ -101,6 +126,13 @@
 </head>
 <body>
 
+<canvas id="fx" class="no-print" aria-hidden="true"></canvas>
+<div id="msg" class="no-print" aria-hidden="true">
+  <svg aria-hidden="true"><use href="#duck"/></svg>
+  <div class="big">¡Felicidades amorcito!</div>
+  <div class="small">¡Los encontraste todos!</div>
+</div>
+
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <symbol id="duck" viewBox="0 0 100 100">
     <ellipse cx="46" cy="66" rx="34" ry="24" fill="#FFD23F" stroke="#0B5563" stroke-width="4"/>
@@ -122,10 +154,12 @@
   <section class="status" aria-live="polite">
     <div class="status-row">
       <div class="count"><b id="found">0</b> <span>de 100 encontrados</span></div>
-      <button class="action no-print" id="reset" type="button">Reiniciar</button>
+      <div class="btns no-print">
+        <button class="action" id="mute" type="button" aria-pressed="true">Sonido: sí</button>
+        <button class="action" id="reset" type="button">Reiniciar</button>
+      </div>
     </div>
     <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bar"><i id="fill" style="width: 0%"></i></div>
-    <div class="win" id="win">¡Encontraste los 100 patitos!</div>
   </section>
 
   <main class="board" id="board" aria-label="Tablero del 1 al 100"></main>
@@ -140,7 +174,7 @@
 
 <script>
 (function () {
-  var KEY = 'patitos-escondite-v1';
+  var KEY = 'patitos-escondite-v2';
   var total = 100;
   var marked = {};          // { numero: true }
   var memoryOnly = false;   // si el navegador no deja guardar, funciona igual en memoria
@@ -163,7 +197,6 @@
   var foundEl = document.getElementById('found');
   var fillEl = document.getElementById('fill');
   var barEl = document.getElementById('bar');
-  var winEl = document.getElementById('win');
   var cells = [];
 
   function build() {
@@ -190,20 +223,234 @@
     foundEl.textContent = count;
     fillEl.style.width = count + '%';
     barEl.setAttribute('aria-valuenow', count);
-    winEl.classList.toggle('on', count === total);
+  }
+
+  /* ---------- Sonido (sintetizado, sin archivos) ---------- */
+  var SKEY = 'patitos-sonido-v1';
+  var soundOn = true;
+  try { if (localStorage.getItem(SKEY) === 'off') soundOn = false; } catch (e) {}
+  var actx = null;
+  var muteBtn = document.getElementById('mute');
+
+  function audio() {
+    if (!actx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try { actx = new AC(); } catch (e) { return null; }
+    }
+    if (actx.state === 'suspended') { try { actx.resume(); } catch (e) {} }
+    return actx;
+  }
+  function tone(freq, when, dur, vol, type) {
+    var o = actx.createOscillator(), g = actx.createGain();
+    var t = actx.currentTime + when;
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  var SCALE = [659.25, 739.99, 830.61, 987.77, 1108.73];   // pentatónica: siempre suena bien
+  function chime(count) {
+    if (!soundOn || !audio()) return;
+    var f = SCALE[count % 5];
+    tone(f, 0, 0.55, 0.16, 'sine');
+    tone(f * 2, 0, 0.35, 0.05, 'sine');
+    tone(f * 1.5, 0.1, 0.65, 0.16, 'sine');
+    tone(f * 3, 0.1, 0.4, 0.04, 'sine');
+  }
+  function unchime() {
+    if (!soundOn || !audio()) return;
+    tone(330, 0, 0.14, 0.09, 'triangle');
+  }
+  function fanfare() {
+    if (!soundOn || !audio()) return;
+    var notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    var times = [0, 0.14, 0.28, 0.42, 0.6];
+    for (var i = 0; i < notes.length; i++) {
+      var last = i === notes.length - 1;
+      tone(notes[i], times[i], last ? 1.5 : 0.35, 0.15, 'triangle');
+      tone(notes[i] * 2, times[i], last ? 1.1 : 0.25, 0.04, 'sine');
+    }
+  }
+  var noiseBuf = null;
+  function popSound() {
+    if (!soundOn || !actx || actx.state !== 'running') return;
+    if (!noiseBuf) {
+      noiseBuf = actx.createBuffer(1, Math.floor(actx.sampleRate * 0.3), actx.sampleRate);
+      var d = noiseBuf.getChannelData(0);
+      for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+    }
+    var t = actx.currentTime;
+    var src = actx.createBufferSource(); src.buffer = noiseBuf;
+    var filt = actx.createBiquadFilter(); filt.type = 'bandpass';
+    filt.frequency.setValueAtTime(2600, t); filt.frequency.exponentialRampToValueAtTime(700, t + 0.28);
+    var g = actx.createGain(); g.gain.value = 0.22;
+    src.connect(filt); filt.connect(g); g.connect(actx.destination);
+    src.start(t);
+    var o = actx.createOscillator(), og = actx.createGain();
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.18);
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    o.connect(og); og.connect(actx.destination);
+    o.start(t); o.stop(t + 0.25);
+  }
+  function paintMute() {
+    muteBtn.textContent = soundOn ? 'Sonido: sí' : 'Sonido: no';
+    muteBtn.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
+  }
+  muteBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    try { localStorage.setItem(SKEY, soundOn ? 'on' : 'off'); } catch (e) {}
+    paintMute();
+    if (soundOn) chime(0);
+  });
+  paintMute();
+
+  /* ---------- Fuegos artificiales ---------- */
+  var fx = document.getElementById('fx');
+  var msg = document.getElementById('msg');
+  var fctx = fx.getContext('2d');
+  var fxToken = 0, fxRaf = 0;
+  var FX_COLORS = ['#FFD23F', '#FF9F1C', '#8FD0E6', '#FFFFFF', '#FF6B8B', '#5BC0BE'];
+
+  function stopFx() {
+    fxToken++;
+    cancelAnimationFrame(fxRaf);
+    fctx.setTransform(1, 0, 0, 1, 0, 0);
+    fctx.clearRect(0, 0, fx.width, fx.height);
+    fx.classList.remove('on');
+    fx.style.display = 'none';
+    msg.classList.remove('on');
+    msg.style.display = 'none';
+  }
+
+  function fireworks(force) {
+    fanfare();
+    var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (calm && !force) return;
+    stopFx();
+    var token = fxToken;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = window.innerWidth, h = window.innerHeight;
+    fx.width = Math.round(w * dpr);
+    fx.height = Math.round(h * dpr);
+    fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    fx.style.display = 'block';
+    void fx.offsetWidth;
+    fx.classList.add('on');
+    msg.style.display = 'block';
+    void msg.offsetWidth;
+    msg.classList.add('on');
+
+    var rockets = [], sparks = [];
+    var DURATION = 7000;
+    var start = performance.now(), last = start, nextLaunch = start;
+    var scale = Math.min(w, h);
+
+    function pick() { return FX_COLORS[Math.floor(Math.random() * FX_COLORS.length)]; }
+
+    function launch() {
+      rockets.push({
+        x: w * (0.12 + Math.random() * 0.76), y: h + 8,
+        vx: (Math.random() - 0.5) * 50,
+        vy: -(h * 0.85 + Math.random() * h * 0.35),
+        ty: h * (0.14 + Math.random() * 0.32),
+        color: pick()
+      });
+    }
+
+    function burst(x, y, color) {
+      popSound();
+      var n = 70 + Math.floor(Math.random() * 50);
+      var power = scale * (0.35 + Math.random() * 0.25);
+      var second = pick();
+      for (var i = 0; i < n; i++) {
+        var a = Math.random() * Math.PI * 2;
+        var s = power * (0.25 + Math.random() * 0.75);
+        var life = 1.1 + Math.random() * 0.9;
+        sparks.push({
+          x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+          life: life, max: life,
+          color: Math.random() < 0.3 ? second : color
+        });
+      }
+    }
+
+    function finish() {
+      fx.classList.remove('on');
+      msg.classList.remove('on');
+      setTimeout(function () { if (token === fxToken) stopFx(); }, 600);
+    }
+
+    function frame(now) {
+      if (token !== fxToken) return;
+      var dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      var t = now - start;
+
+      if (t < DURATION - 1500 && now >= nextLaunch) {
+        launch();
+        if (Math.random() < 0.45) launch();
+        nextLaunch = now + 300 + Math.random() * 450;
+      }
+
+      fctx.globalCompositeOperation = 'destination-out';
+      fctx.fillStyle = 'rgba(0,0,0,0.25)';
+      fctx.fillRect(0, 0, w, h);
+      fctx.globalCompositeOperation = 'source-over';
+      fctx.globalAlpha = 1;
+
+      for (var i = rockets.length - 1; i >= 0; i--) {
+        var r = rockets[i];
+        r.x += r.vx * dt; r.y += r.vy * dt;
+        if (r.y <= r.ty) { burst(r.x, r.y, r.color); rockets.splice(i, 1); continue; }
+        fctx.fillStyle = '#FFF3B0';
+        fctx.beginPath(); fctx.arc(r.x, r.y, 2.6, 0, 6.2832); fctx.fill();
+      }
+
+      var drag = Math.pow(0.25, dt);
+      for (var j = sparks.length - 1; j >= 0; j--) {
+        var p = sparks[j];
+        p.life -= dt;
+        if (p.life <= 0) { sparks.splice(j, 1); continue; }
+        p.vx *= drag; p.vy = p.vy * drag + 170 * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        var al = p.life / p.max;
+        fctx.globalAlpha = al;
+        fctx.fillStyle = p.color;
+        fctx.beginPath(); fctx.arc(p.x, p.y, 1.2 + 2 * al, 0, 6.2832); fctx.fill();
+      }
+      fctx.globalAlpha = 1;
+
+      if (t >= DURATION && !rockets.length && !sparks.length) { finish(); return; }
+      fxRaf = requestAnimationFrame(frame);
+    }
+
+    launch(); launch(); launch();
+    fxRaf = requestAnimationFrame(frame);
   }
 
   board.addEventListener('click', function (e) {
     var b = e.target.closest('.cell');
     if (!b) return;
     var n = +b.dataset.n;
+    var before = Object.keys(marked).length;
     if (marked[n]) delete marked[n]; else marked[n] = true;
     paint(n); summary(); save();
+    var after = Object.keys(marked).length;
+    if (before < total && after === total) fireworks(false);
+    else if (marked[n]) chime(after);
+    else unchime();
   });
 
   document.getElementById('reset').addEventListener('click', function () {
     if (!Object.keys(marked).length) return;
     if (confirm('¿Borrar todas las marcas y empezar de nuevo?')) {
+      stopFx();
       marked = {};
       for (var i = 1; i <= total; i++) paint(i);
       summary(); save();
